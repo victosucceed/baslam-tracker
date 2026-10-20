@@ -452,7 +452,7 @@ const KEY='baslam-tracker-v1';
 const START='2026-10-20';
 let db={entries:{},reviews:{},milestones:[],workouts:{},meals:{},work:{sessions:{},remak:{},goals:{}}};
 try{const raw=localStorage.getItem(KEY); if(raw) db=Object.assign(db,JSON.parse(raw));}catch(e){}
-function normalize(d){d=d&&typeof d==='object'?d:{};const w=d.work&&typeof d.work==='object'?d.work:{};return {entries:d.entries||{},reviews:d.reviews||{},milestones:Array.isArray(d.milestones)?d.milestones:[],workouts:d.workouts||{},meals:d.meals||{},work:{sessions:w.sessions||{},remak:w.remak||{},goals:w.goals||{}}};}
+function normalize(d){d=d&&typeof d==='object'?d:{};const w=d.work&&typeof d.work==='object'?d.work:{};return {entries:d.entries||{},reviews:d.reviews||{},milestones:Array.isArray(d.milestones)?d.milestones:[],workouts:d.workouts||{},meals:d.meals||{},work:{sessions:w.sessions||{},remak:w.remak||{},goals:w.goals||{},skip:w.skip||{}}};}
 db=normalize(db);
 let saveFailed=false;
 function save(){ try{localStorage.setItem(KEY,JSON.stringify(db));localStorage.setItem('baslam-updated',String(Date.now()));saveFailed=false;}catch(e){saveFailed=true;} schedulePush(); }
@@ -521,7 +521,8 @@ function trainingLabel(s){const d=dow(s);return d===6?'Swim day':d===1?'Push day
 function workRequired(s){const d=dow(s);return d>=1&&d<=5;}
 const ITEMS=[{key:'clean',label:'Clean day'},{key:'work',label:'Side work'},{key:'train',label:'Training'},{key:'sleep',label:'Sleep on time'},{key:'noFast',label:'No fast food'},{key:'shower',label:'Two showers'},{key:'read',label:'Reading'}];
 function sideHours(s){return (db.work.sessions[s]||[]).filter(x=>x.b!=='remak').reduce((a,x)=>a+hrs(x.s,x.e),0);}
-function workVal(s){const e=get(s);const h=sideHours(s);if(h>0)return h;return e?e.work:null;}
+function skipFor(s){if(!db.work.skip[s])db.work.skip[s]={};return db.work.skip[s];}
+function workVal(s){const e=get(s);const h=sideHours(s);if(h>0)return h;const sk=db.work.skip[s];if(sk&&(sk.vts||sk.salma))return 0;return e?e.work:null;}
 function evalDay(s){
   const e=get(s)||blank(); const r={}; const wv=workVal(s);
   r.clean = e.clean===null?'blank':(e.clean?'ok':'no');
@@ -625,7 +626,7 @@ function renderToday(){
   const ss=db.work.sessions[cur]||[]; const r=db.work.remak[cur];
   const wsum=card('Work today',(ss.length||(r&&r.in))?'':'Nothing logged. Use the Work tab or the plus button.');
   const sumBtn=h(`<button class="btn sm">${I.work} Open Work</button>`);sumBtn.onclick=()=>switchTab('work');wsum.head.appendChild(sumBtn);
-  if(r&&(r.in||r.out))wsum.appendChild(h(`<div class="sess"><div class="tm num" style="color:var(--orange)">${r.in||'–'}–${r.out||'–'}<small>${r.in&&r.out?fmtH(hrs(r.in,r.out)):''}</small></div><div class="tx"><b>Remak</b><span>${r.n?esc(r.n):'No line for the day'}</span></div></div>`));
+  if(r&&(r.in||r.out||r.off))wsum.appendChild(h(`<div class="sess"><div class="tm num" style="color:var(--orange)">${r.off?REMAK_OFF[r.off]:`${r.in||'–'}–${r.out||'–'}`}<small>${r.in&&r.out?fmtH(hrs(r.in,r.out)):''}</small></div><div class="tx"><b>Remak</b><span>${r.n?esc(r.n):'No line for the day'}</span></div></div>`));
   ss.slice().sort((a,b)=>mins(a.s)-mins(b.s)).forEach(x=>wsum.appendChild(h(`<div class="sess"><div class="tm num">${x.s}–${x.e}<small>${fmtH(hrs(x.s,x.e))}</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[x.b].color};display:inline-block"></i>${BIZ[x.b].n} · ${esc(x.c)}</b><span>${x.n?esc(x.n):'No output noted'}</span></div></div>`)));
   A.appendChild(wsum);
   const list=h(`<div class="card"><div class="h-row"><div><h2>Checklist</h2><p class="lead" style="margin:2px 0 0">Tap a row. One tap logs it.</p></div></div><div class="list"></div></div>`); const L2=list.querySelector('.list');
@@ -654,6 +655,8 @@ function renderToday(){
 // ---------- Work ----------
 const BIZ={vts:{n:'VTS',color:'#C6F135',cats:['Marketing','App','Planning','Finance','Sales']},salma:{n:'Salma Plas',color:'#5EC8F5',cats:['Production tracker','Meetings','Accountability','Finance','Operations']},remak:{n:'Remak',color:'#F59E42',cats:[]}};
 const CATCOL=['#C6F135','#8FD36A','#5EC8F5','#F59E42','#E0B56A','#C08CF0'];
+const REMAK_OFF={off:'Day off',sick:'Sick',holiday:'Holiday',missed:'Missed'};
+const SKIP_L={off:'Day off',notime:'No time',tired:'Too tired',avoided:'Avoided'};
 function sessionsFor(s){if(!db.work.sessions[s])db.work.sessions[s]=[];return db.work.sessions[s];}
 function remakFor(s){if(!db.work.remak[s])db.work.remak[s]={in:'',out:'',n:''};return db.work.remak[s];}
 function goalsFor(m){if(!db.work.goals[m])db.work.goals[m]={vts:[],salma:[],remak:[]};const g=db.work.goals[m];['vts','salma','remak'].forEach(k=>{if(!Array.isArray(g[k]))g[k]=[];});return g;}
@@ -661,13 +664,13 @@ function bizHours(b,days){let t=0;days.forEach(s=>{if(b==='remak'){const r=db.wo
 function bizCatHours(b,days){const o={};days.forEach(s=>(db.work.sessions[s]||[]).forEach(x=>{if(x.b===b){o[x.c||'Other']=(o[x.c||'Other']||0)+hrs(x.s,x.e);}}));return o;}
 function bizOutputs(b,days){let n=0;days.forEach(s=>(db.work.sessions[s]||[]).forEach(x=>{if(x.b===b&&x.n&&x.n.trim())n++;}));return n;}
 function lastTouched(b){const ds=Object.keys(db.work.sessions).filter(s=>(db.work.sessions[s]||[]).some(x=>x.b===b)).sort();return ds[ds.length-1]||null;}
-function workFlags(days){const f=[];const t0=today();['vts','salma'].forEach(b=>{const hb=bizHours(b,days),out=bizOutputs(b,days);if(hb>=3&&out===0)f.push(`${BIZ[b].n}: ${fmtH(hb)} this week and not one "what moved" line.`);const lt=lastTouched(b);if(lt&&addDays(lt,7)<t0)f.push(`${BIZ[b].n}: untouched since ${short(lt)}.`);});const late=days.reduce((a,s)=>a+(db.work.sessions[s]||[]).filter(x=>x.b!=='remak'&&mins(x.s)>=21*60+30).length,0);if(late>=2)f.push(`${late} side-work sessions started after 21:30. Bedtime is losing.`);const lateIn=days.filter(s=>{const r=db.work.remak[s];return r&&r.in&&mins(r.in)>8*60+10;}).length;if(lateIn>=3)f.push(`Remak: arrived after 08:10 on ${lateIn} days.`);return f;}
+function workFlags(days){const f=[];const t0=today();['vts','salma'].forEach(b=>{const hb=bizHours(b,days),out=bizOutputs(b,days);if(hb>=3&&out===0)f.push(`${BIZ[b].n}: ${fmtH(hb)} this week and not one "what moved" line.`);const lt=lastTouched(b);if(lt&&addDays(lt,7)<t0)f.push(`${BIZ[b].n}: untouched since ${short(lt)}.`);});const late=days.reduce((a,s)=>a+(db.work.sessions[s]||[]).filter(x=>x.b!=='remak'&&mins(x.s)>=21*60+30).length,0);if(late>=2)f.push(`${late} side-work sessions started after 21:30. Bedtime is losing.`);const lateIn=days.filter(s=>{const r=db.work.remak[s];return r&&r.in&&mins(r.in)>8*60+10;}).length;if(lateIn>=3)f.push(`Remak: arrived after 08:10 on ${lateIn} days.`);const av=days.reduce((a,s)=>a+['vts','salma'].filter(b=>db.work.skip[s]&&db.work.skip[s][b]==='avoided').length,0);if(av>=2)f.push(`"Avoided it" logged ${av} times this week. That is the thing to look at on Sunday.`);const rm=days.filter(s=>db.work.remak[s]&&db.work.remak[s].off==='missed').length;if(rm)f.push(`Remak: ${rm} missed day${rm===1?'':'s'} this week.`);return f;}
 let wf={b:'vts',c:'Marketing',s:'18:45',e:'21:45',n:''};
 function renderWork(){
   const root=$('#tab-work'); root.innerHTML='';
   const days=weekDays(cur), prev=weekDays(addDays(cur,-7)), m=days[0];
   const g=h(`<div class="g"></div>`);
-  const gl=goalsFor(m);
+  const gl=goalsFor(m); const ss=sessionsFor(cur);
   const tiles=['vts','salma','remak'].map(b=>{const hN=bizHours(b,days),hP=bizHours(b,prev);const goals=gl[b].filter(x=>x.t);const done=goals.filter(x=>x.done).length;const series=days.map(s=>bizHours(b,[s]));return kpi(BIZ[b].n,`<i style="width:9px;height:9px;border-radius:50%;background:${BIZ[b].color};display:inline-block"></i>`,fmtH(hN),goals.length?`${done}/${goals.length} goals`:'this week',series,Math.round((hN-hP)*10),`${hN-hP>=0?'+':''}${fmtH(Math.abs(hN-hP))} vs prev`,BIZ[b].color);}).join('');
   const fl=workFlags(days);
   g.appendChild(h(`<div class="kpis" style="grid-column:span 12">${tiles}${kpi('Outputs',I.tick,bizOutputs('vts',days)+bizOutputs('salma',days),'this week',days.map(s=>(db.work.sessions[s]||[]).filter(x=>x.n&&x.n.trim()).length),null,'')}</div>`));
@@ -688,14 +691,29 @@ function renderWork(){
   f.appendChild(add);A.appendChild(f);
   const r=remakFor(cur);
   const rk=card('Remak',`${fmtL(cur)}. Clock in, clock out, one line.`);
-  rk.head.appendChild(h(`<span class="disp num" style="font-size:20px;color:var(--orange)">${r.in&&r.out?fmtH(hrs(r.in,r.out)):''}</span>`));
-  const rt=h(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div>`);
-  rt.appendChild(timeCtl('Clock in',r.in,v=>{r.in=v;save();render();},['07:45','08:00','08:15']));rt.appendChild(timeCtl('Clock out',r.out,v=>{r.out=v;save();render();},['16:00','16:15','16:30']));rk.appendChild(rt);
-  const rn=h(`<div style="margin-top:12px"><div class="label">What I did or learned</div><input type="text" style="width:100%" value="${esc(r.n)}" placeholder="One line. What can I do now that I could not do last month?" maxlength="160"></div>`);rn.querySelector('input').onchange=ev=>{r.n=ev.target.value;save();};rk.appendChild(rn);
-  if(r.in&&mins(r.in)>8*60+10)rk.appendChild(h(`<p class="muted" style="margin:10px 0 0;color:var(--warn)">Arrived after 08:10.</p>`));
+  rk.head.appendChild(h(`<span class="disp num" style="font-size:20px;color:var(--orange)">${r.off?REMAK_OFF[r.off]:(r.in&&r.out?fmtH(hrs(r.in,r.out)):'')}</span>`));
+  rk.appendChild(h(`<div class="label">Status</div>`));
+  rk.appendChild(chipSel([['Worked',''],['Day off','off'],['Sick','sick'],['Holiday','holiday'],['Missed','missed']],r.off||'',v=>{r.off=v||undefined;if(v){r.in='';r.out='';}save();render();}));
+  if(!r.off){
+    const rt=h(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px"></div>`);
+    rt.appendChild(timeCtl('Clock in',r.in,v=>{r.in=v;save();render();},['07:45','08:00','08:15']));rt.appendChild(timeCtl('Clock out',r.out,v=>{r.out=v;save();render();},['16:00','16:15','16:30']));rk.appendChild(rt);
+    const rn=h(`<div style="margin-top:12px"><div class="label">What I did or learned</div><input type="text" style="width:100%" value="${esc(r.n)}" placeholder="One line. What can I do now that I could not do last month?" maxlength="160"></div>`);rn.querySelector('input').onchange=ev=>{r.n=ev.target.value;save();};rk.appendChild(rn);
+    if(r.in&&mins(r.in)>8*60+10)rk.appendChild(h(`<p class="muted" style="margin:10px 0 0;color:var(--warn)">Arrived after 08:10.</p>`));
+  }else{
+    const rn=h(`<div style="margin-top:12px"><div class="label">Why</div><input type="text" style="width:100%" value="${esc(r.n)}" placeholder="${r.off==='missed'?'What happened? Be honest, this is the line that matters.':'Optional note.'}" maxlength="160"></div>`);rn.querySelector('input').onchange=ev=>{r.n=ev.target.value;save();};rk.appendChild(rn);
+  }
   A.appendChild(rk);
-  const ss=sessionsFor(cur);
+  // missed side work
+  const sk=skipFor(cur);
+  const missBiz=['vts','salma'].filter(b=>!ss.some(x=>x.b===b));
+  if(missBiz.length||sk.vts||sk.salma){
+    const mk=card('Nothing logged?','If a business got no time today, say why. A logged miss is worth more than a blank.');
+    ['vts','salma'].forEach(b=>{if(ss.some(x=>x.b===b)&&!sk[b])return;mk.appendChild(h(`<div class="label" style="display:flex;align-items:center;gap:8px"><i style="width:9px;height:9px;border-radius:50%;background:${BIZ[b].color};display:inline-block"></i>${BIZ[b].n}</div>`));
+      mk.appendChild(chipSel([['Not yet',''],['Day off','off'],['No time','notime'],['Too tired','tired'],['Avoided it','avoided']],sk[b]||'',v=>{if(v)sk[b]=v;else delete sk[b];save();render();}));});
+    A.appendChild(mk);
+  }
   const sl=card('Sessions',`${fmtL(cur)}${ss.length?` · ${fmtH(ss.reduce((a,x)=>a+hrs(x.s,x.e),0))}`:' · nothing logged yet'}`);
+  ['vts','salma'].forEach(b=>{if(sk[b])sl.appendChild(h(`<div class="sess"><div class="tm num" style="color:var(--text-3)">—<small>no session</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[b].color};display:inline-block"></i>${BIZ[b].n} · ${SKIP_L[sk[b]]}</b><span>Logged as a miss.</span></div></div>`));});
   ss.slice().sort((a,b)=>mins(a.s)-mins(b.s)).forEach(x=>{const row=h(`<div class="sess"><div class="tm num">${x.s}–${x.e}<small>${fmtH(hrs(x.s,x.e))}</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[x.b].color};display:inline-block"></i>${BIZ[x.b].n} · ${esc(x.c)}</b><span>${x.n?esc(x.n):'No output noted'}</span></div><button class="del" aria-label="Delete session">${I.trash}</button></div>`);row.querySelector('.del').onclick=()=>{const idx=ss.indexOf(x);if(idx>-1){ss.splice(idx,1);save();render();}};sl.appendChild(row);});
   B.appendChild(sl);
   const wt=card('This week by business','Hours by category, outputs, and when in the day the work happened.');
@@ -706,7 +724,9 @@ function renderWork(){
       <div style="grid-column:1/-1"><div class="tod">${Array.from({length:18},(_,i)=>{const hStart=6+i;const on=days.some(s=>(db.work.sessions[s]||[]).some(x=>x.b===b&&mins(x.s)<(hStart+1)*60&&mins(x.e)>hStart*60));return `<i class="${on?'on':''}"></i>`;}).join('')}</div><div class="todl"><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div></div></div>`));});
   const rIns=days.map(s=>db.work.remak[s]).filter(x=>x&&x.in&&x.out);
   wt.appendChild(h(`<div class="bizrow" style="--bc:${BIZ.remak.color}"><div class="nm"><i style="background:${BIZ.remak.color}"></i>Remak</div><div class="hv num">${fmtH(bizHours('remak',days))}<small>${rIns.length} day${rIns.length===1?'':'s'}</small></div>
-    <div class="cats" style="gap:6px">${days.map(s=>{const x=db.work.remak[s];const ok=x&&x.in&&x.out;const late=x&&x.in&&mins(x.in)>8*60+10;return `<span style="padding:4px 8px;border-radius:8px;background:${ok?(late?'var(--warn-soft)':'var(--accent-soft)'):'var(--card)'};border:1px solid var(--line)"><b style="font-family:Sora,sans-serif">${DAYN[dow(s)]}</b> ${ok?`${x.in}–${x.out}`:'–'}</span>`;}).join('')}</div></div>`));
+    <div class="cats" style="gap:6px">${days.map(s=>{const x=db.work.remak[s];const ok=x&&x.in&&x.out;const late=x&&x.in&&mins(x.in)>8*60+10;const off=x&&x.off;return `<span style="padding:4px 8px;border-radius:8px;background:${ok?(late?'var(--warn-soft)':'var(--accent-soft)'):off==='missed'?'var(--danger-soft)':'var(--card)'};border:1px solid var(--line)"><b style="font-family:Sora,sans-serif">${DAYN[dow(s)]}</b> ${ok?`${x.in}–${x.out}`:off?REMAK_OFF[off]:'–'}</span>`;}).join('')}</div></div>`));
+  const skipped=days.flatMap(s=>['vts','salma'].filter(b=>db.work.skip[s]&&db.work.skip[s][b]).map(b=>({s,b,r:db.work.skip[s][b]})));
+  if(skipped.length)wt.appendChild(h(`<div class="cats" style="margin-top:8px;gap:6px">${skipped.map(x=>`<span style="padding:4px 8px;border-radius:8px;background:${x.r==='avoided'?'var(--danger-soft)':'var(--card)'};border:1px solid var(--line)"><i style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${BIZ[x.b].color};margin-right:5px"></i><b style="font-family:Sora,sans-serif">${DAYN[dow(x.s)]}</b> ${BIZ[x.b].n} · ${SKIP_L[x.r]}</span>`).join('')}</div>`));
   B.appendChild(wt);
   const gc=card('Goals · week of '+short(m),'Three outcomes per business, set on Sunday. Outcomes, not tasks.');
   const gg=h(`<div style="display:grid;grid-template-columns:1fr;gap:10px"></div>`);
@@ -918,7 +938,9 @@ function buildReport(){
   html+=`</table><h2>Work sessions</h2><table><tr><th>Date</th><th>Business</th><th>Time</th><th>Category</th><th>What moved</th></tr>`;
   Object.keys(db.work.sessions).sort().forEach(s=>db.work.sessions[s].forEach(x=>{html+=`<tr><td>${short(s)}</td><td>${BIZ[x.b].n}</td><td>${x.s}–${x.e} (${fmtH(hrs(x.s,x.e))})</td><td>${esc(x.c)}</td><td>${esc(x.n)}</td></tr>`;}));
   html+=`</table><h2>Remak</h2><table><tr><th>Date</th><th>In</th><th>Out</th><th>Hours</th><th>Note</th></tr>`;
-  Object.keys(db.work.remak).sort().forEach(s=>{const r=db.work.remak[s];if(r.in||r.out||r.n)html+=`<tr><td>${short(s)}</td><td>${r.in}</td><td>${r.out}</td><td>${r.in&&r.out?fmtH(hrs(r.in,r.out)):''}</td><td>${esc(r.n)}</td></tr>`;});
+  Object.keys(db.work.remak).sort().forEach(s=>{const r=db.work.remak[s];if(r.in||r.out||r.n||r.off)html+=`<tr><td>${short(s)}</td><td>${r.off?REMAK_OFF[r.off]:r.in}</td><td>${r.off?'':r.out}</td><td>${r.in&&r.out?fmtH(hrs(r.in,r.out)):''}</td><td>${esc(r.n)}</td></tr>`;});
+  html+=`</table><h2>Missed side work</h2><table><tr><th>Date</th><th>Business</th><th>Reason</th></tr>`;
+  Object.keys(db.work.skip).sort().forEach(s=>['vts','salma'].forEach(b=>{if(db.work.skip[s][b])html+=`<tr><td>${short(s)}</td><td>${BIZ[b].n}</td><td>${SKIP_L[db.work.skip[s][b]]}</td></tr>`;}));
   html+=`</table><h2>Weekly goals</h2><table><tr><th>Week of</th><th>Business</th><th>Goal</th><th>Done</th></tr>`;
   Object.keys(db.work.goals).sort().forEach(m=>['vts','salma','remak'].forEach(b=>(db.work.goals[m][b]||[]).forEach(gl=>{if(gl.t)html+=`<tr><td>${short(m)}</td><td>${BIZ[b].n}</td><td>${esc(gl.t)}</td><td>${gl.done?'✓':''}</td></tr>`;})));
   html+=`</table><h2>Strength</h2><table><tr><th>Lift</th><th>First</th><th>Now</th><th>Change</th><th>Sessions</th></tr>`;
