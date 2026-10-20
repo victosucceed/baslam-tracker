@@ -268,6 +268,26 @@
   .heat i.l1{background:color-mix(in srgb,var(--accent) 30%,var(--track))} .heat i.l2{background:color-mix(in srgb,var(--accent) 55%,var(--track))} .heat i.l3{background:color-mix(in srgb,var(--accent) 80%,var(--track))} .heat i.l4{background:var(--accent);box-shadow:0 0 6px var(--accent-glow)}
   .heat i.today{outline:1.5px solid var(--text)}
 
+  /* timer */
+  .timer{position:relative;overflow:hidden}
+  .timer .clock{font-size:52px;line-height:1;letter-spacing:-.04em;margin:6px 0 2px;display:flex;align-items:baseline;gap:10px}
+  .timer .clock small{font-size:12px;color:var(--text-3);font-family:Inter,sans-serif;font-weight:600;letter-spacing:0}
+  .timer .live{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+  .timer .live i{width:8px;height:8px;border-radius:50%;background:var(--text-3)}
+  .timer.running .live{color:var(--accent)} .timer.running .live i{background:var(--accent);box-shadow:0 0 0 0 var(--accent-glow);animation:beat 1.6s ease-out infinite}
+  .timer.paused .live{color:var(--warn)} .timer.paused .live i{background:var(--warn)}
+  @keyframes beat{0%{box-shadow:0 0 0 0 var(--accent-glow)}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  .timer .ctl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  .timer .ctl .btn{min-height:54px;font-size:15px;border-radius:16px}
+  .timer .ctl .btn svg{width:20px;height:20px}
+  .timer .ctl .one{grid-column:1/-1}
+  .tpill{display:inline-flex;align-items:center;gap:8px;min-height:42px;padding:0 14px;border-radius:12px;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);color:var(--text);font-family:Sora,sans-serif;font-weight:700;font-size:13px;white-space:nowrap}
+  .tpill i{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:beat 1.6s ease-out infinite}
+  .tpill.paused{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 40%,transparent)} .tpill.paused i{background:var(--warn);animation:none}
+  @media (max-width:560px){.tpill span.l{display:none}.timer .clock{font-size:42px}}
+  @media (max-width:899px){.top-in:has(.tpill:not(.hidden)) .brand small{display:none}.top-in:has(.tpill:not(.hidden)) .brand b{white-space:nowrap}}
+  @media (max-width:560px){.top-in:has(.tpill:not(.hidden)) .brand{display:none}.tpill{min-height:38px;padding:0 10px;font-size:12px}}
+
   /* work */
   .sess{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
   .sess:last-child{border-bottom:0}
@@ -385,6 +405,7 @@
         <div class="brand"><div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg></div><div><b>Baslam</b><small id="brandSub">Did I do it today?</small></div></div>
         <div class="title"><h1 id="pageTitle">Overview</h1><p id="pageSub"></p></div>
         <div class="tools">
+          <button class="tpill hidden" id="tpill" aria-label="Running timer"></button>
           <div class="datepill"><button class="icon-btn" id="prevDay" aria-label="Previous"></button><div class="datelbl" id="dateLabel" role="button" tabindex="0"></div><button class="icon-btn" id="nextDay" aria-label="Next"></button></div>
           <button class="icon-btn cloud local" id="cloudBtn" aria-label="Cloud sync status" title="Not signed in"></button>
           <button class="icon-btn" id="themeBtn" aria-label="Switch theme"></button>
@@ -452,7 +473,7 @@ const KEY='baslam-tracker-v1';
 const START='2026-10-20';
 let db={entries:{},reviews:{},milestones:[],workouts:{},meals:{},work:{sessions:{},remak:{},goals:{}}};
 try{const raw=localStorage.getItem(KEY); if(raw) db=Object.assign(db,JSON.parse(raw));}catch(e){}
-function normalize(d){d=d&&typeof d==='object'?d:{};const w=d.work&&typeof d.work==='object'?d.work:{};return {entries:d.entries||{},reviews:d.reviews||{},milestones:Array.isArray(d.milestones)?d.milestones:[],workouts:d.workouts||{},meals:d.meals||{},work:{sessions:w.sessions||{},remak:w.remak||{},goals:w.goals||{},skip:w.skip||{}}};}
+function normalize(d){d=d&&typeof d==='object'?d:{};const w=d.work&&typeof d.work==='object'?d.work:{};return {entries:d.entries||{},reviews:d.reviews||{},milestones:Array.isArray(d.milestones)?d.milestones:[],workouts:d.workouts||{},meals:d.meals||{},work:{sessions:w.sessions||{},remak:w.remak||{},goals:w.goals||{},skip:w.skip||{},timer:w.timer||null}};}
 db=normalize(db);
 let saveFailed=false;
 function save(){ try{localStorage.setItem(KEY,JSON.stringify(db));localStorage.setItem('baslam-updated',String(Date.now()));saveFailed=false;}catch(e){saveFailed=true;} schedulePush(); }
@@ -505,6 +526,8 @@ const mins=t=>{if(!t||!/^\d{1,2}:\d{2}$/.test(t))return null;const [h,m]=t.split
 const toT=m=>{m=((m%1440)+1440)%1440;return pad(Math.floor(m/60))+':'+pad(m%60);};
 const hrs=(a,b)=>{const x=mins(a),y=mins(b);if(x===null||y===null)return 0;let d=y-x;if(d<0)d+=1440;return Math.round(d/60*100)/100;};
 const fmtH=h=>{const H=Math.floor(h),M=Math.round((h-H)*60);return M?`${H}h ${pad(M)}`:`${H}h`;};
+const sessH=x=>Math.max(0,Math.round((hrs(x.s,x.e)-(x.p||0)/60)*100)/100);
+const fmtClock=ms=>{const s=Math.max(0,Math.floor(ms/1000));return `${pad(Math.floor(s/3600))}:${pad(Math.floor(s%3600/60))}:${pad(s%60)}`;};
 let cur=today();
 let tab='today';
 let period='week';
@@ -520,7 +543,7 @@ function trainingRequired(s){const d=dow(s);return d===1||d===3||d===5||d===6;}
 function trainingLabel(s){const d=dow(s);return d===6?'Swim day':d===1?'Push day':d===3?'Pull day':d===5?'Legs day':d===0?'Full rest':'Rest day';}
 function workRequired(s){const d=dow(s);return d>=1&&d<=5;}
 const ITEMS=[{key:'clean',label:'Clean day'},{key:'work',label:'Side work'},{key:'train',label:'Training'},{key:'sleep',label:'Sleep on time'},{key:'noFast',label:'No fast food'},{key:'shower',label:'Two showers'},{key:'read',label:'Reading'}];
-function sideHours(s){return (db.work.sessions[s]||[]).filter(x=>x.b!=='remak').reduce((a,x)=>a+hrs(x.s,x.e),0);}
+function sideHours(s){return (db.work.sessions[s]||[]).filter(x=>x.b!=='remak').reduce((a,x)=>a+sessH(x),0);}
 function skipFor(s){if(!db.work.skip[s])db.work.skip[s]={};return db.work.skip[s];}
 function workVal(s){const e=get(s);const h=sideHours(s);if(h>0)return h;const sk=db.work.skip[s];if(sk&&(sk.vts||sk.salma))return 0;return e?e.work:null;}
 function evalDay(s){
@@ -627,7 +650,7 @@ function renderToday(){
   const wsum=card('Work today',(ss.length||(r&&r.in))?'':'Nothing logged. Use the Work tab or the plus button.');
   const sumBtn=h(`<button class="btn sm">${I.work} Open Work</button>`);sumBtn.onclick=()=>switchTab('work');wsum.head.appendChild(sumBtn);
   if(r&&(r.in||r.out||r.off))wsum.appendChild(h(`<div class="sess"><div class="tm num" style="color:var(--orange)">${r.off?REMAK_OFF[r.off]:`${r.in||'–'}–${r.out||'–'}`}<small>${r.in&&r.out?fmtH(hrs(r.in,r.out)):''}</small></div><div class="tx"><b>Remak</b><span>${r.n?esc(r.n):'No line for the day'}</span></div></div>`));
-  ss.slice().sort((a,b)=>mins(a.s)-mins(b.s)).forEach(x=>wsum.appendChild(h(`<div class="sess"><div class="tm num">${x.s}–${x.e}<small>${fmtH(hrs(x.s,x.e))}</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[x.b].color};display:inline-block"></i>${BIZ[x.b].n} · ${esc(x.c)}</b><span>${x.n?esc(x.n):'No output noted'}</span></div></div>`)));
+  ss.slice().sort((a,b)=>mins(a.s)-mins(b.s)).forEach(x=>wsum.appendChild(h(`<div class="sess"><div class="tm num">${x.s}–${x.e}<small>${fmtH(sessH(x))}</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[x.b].color};display:inline-block"></i>${BIZ[x.b].n} · ${esc(x.c)}</b><span>${x.n?esc(x.n):'No output noted'}</span></div></div>`)));
   A.appendChild(wsum);
   const list=h(`<div class="card"><div class="h-row"><div><h2>Checklist</h2><p class="lead" style="margin:2px 0 0">Tap a row. One tap logs it.</p></div></div><div class="list"></div></div>`); const L2=list.querySelector('.list');
   L2.appendChild(h(`<div class="label">Discipline</div>`));
@@ -660,12 +683,53 @@ const SKIP_L={off:'Day off',notime:'No time',tired:'Too tired',avoided:'Avoided'
 function sessionsFor(s){if(!db.work.sessions[s])db.work.sessions[s]=[];return db.work.sessions[s];}
 function remakFor(s){if(!db.work.remak[s])db.work.remak[s]={in:'',out:'',n:''};return db.work.remak[s];}
 function goalsFor(m){if(!db.work.goals[m])db.work.goals[m]={vts:[],salma:[],remak:[]};const g=db.work.goals[m];['vts','salma','remak'].forEach(k=>{if(!Array.isArray(g[k]))g[k]=[];});return g;}
-function bizHours(b,days){let t=0;days.forEach(s=>{if(b==='remak'){const r=db.work.remak[s];if(r&&r.in&&r.out)t+=hrs(r.in,r.out);}else (db.work.sessions[s]||[]).forEach(x=>{if(x.b===b)t+=hrs(x.s,x.e);});});return t;}
-function bizCatHours(b,days){const o={};days.forEach(s=>(db.work.sessions[s]||[]).forEach(x=>{if(x.b===b){o[x.c||'Other']=(o[x.c||'Other']||0)+hrs(x.s,x.e);}}));return o;}
+function bizHours(b,days){let t=0;days.forEach(s=>{if(b==='remak'){const r=db.work.remak[s];if(r&&r.in&&r.out)t+=hrs(r.in,r.out);}else (db.work.sessions[s]||[]).forEach(x=>{if(x.b===b)t+=sessH(x);});});return t;}
+function bizCatHours(b,days){const o={};days.forEach(s=>(db.work.sessions[s]||[]).forEach(x=>{if(x.b===b){o[x.c||'Other']=(o[x.c||'Other']||0)+sessH(x);}}));return o;}
 function bizOutputs(b,days){let n=0;days.forEach(s=>(db.work.sessions[s]||[]).forEach(x=>{if(x.b===b&&x.n&&x.n.trim())n++;}));return n;}
 function lastTouched(b){const ds=Object.keys(db.work.sessions).filter(s=>(db.work.sessions[s]||[]).some(x=>x.b===b)).sort();return ds[ds.length-1]||null;}
 function workFlags(days){const f=[];const t0=today();['vts','salma'].forEach(b=>{const hb=bizHours(b,days),out=bizOutputs(b,days);if(hb>=3&&out===0)f.push(`${BIZ[b].n}: ${fmtH(hb)} this week and not one "what moved" line.`);const lt=lastTouched(b);if(lt&&addDays(lt,7)<t0)f.push(`${BIZ[b].n}: untouched since ${short(lt)}.`);});const late=days.reduce((a,s)=>a+(db.work.sessions[s]||[]).filter(x=>x.b!=='remak'&&mins(x.s)>=21*60+30).length,0);if(late>=2)f.push(`${late} side-work sessions started after 21:30. Bedtime is losing.`);const lateIn=days.filter(s=>{const r=db.work.remak[s];return r&&r.in&&mins(r.in)>8*60+10;}).length;if(lateIn>=3)f.push(`Remak: arrived after 08:10 on ${lateIn} days.`);const av=days.reduce((a,s)=>a+['vts','salma'].filter(b=>db.work.skip[s]&&db.work.skip[s][b]==='avoided').length,0);if(av>=2)f.push(`"Avoided it" logged ${av} times this week. That is the thing to look at on Sunday.`);const rm=days.filter(s=>db.work.remak[s]&&db.work.remak[s].off==='missed').length;if(rm)f.push(`Remak: ${rm} missed day${rm===1?'':'s'} this week.`);return f;}
 let wf={b:'vts',c:'Marketing',s:'18:45',e:'21:45',n:''};
+// ---------- timer ----------
+const T=()=>db.work.timer;
+function timerElapsed(t){if(!t)return 0;return (t.acc||0)+(t.running?Date.now()-t.since:0);}
+function timerStart(b,c){db.work.timer={b,c,startAt:Date.now(),since:Date.now(),acc:0,paused:0,pausedAt:null,running:true,day:today()};save();render();}
+function timerPause(){const t=T();if(!t||!t.running)return;t.acc+=Date.now()-t.since;t.running=false;t.pausedAt=Date.now();save();render();}
+function timerResume(){const t=T();if(!t||t.running)return;t.paused+=Date.now()-(t.pausedAt||Date.now());t.pausedAt=null;t.since=Date.now();t.running=true;save();render();}
+function timerStop(){const t=T();if(!t)return;const net=timerElapsed(t);if(net<60*1000){if(!confirm('Less than a minute. Discard the timer?'))return;db.work.timer=null;save();render();return;}
+  const start=new Date(t.startAt),end=new Date();const s=pad(start.getHours())+':'+pad(start.getMinutes()),e=pad(end.getHours())+':'+pad(end.getMinutes());
+  const pauseMin=Math.round(((end-start)-net)/60000);
+  const day=t.day||today();
+  const n=prompt(`${BIZ[t.b].n} · ${t.c} · ${fmtClock(net)} net${pauseMin?` (${pauseMin} min paused)`:''}\n\nWhat moved? One line.`,'');
+  if(n===null)return;
+  sessionsFor(day).push({b:t.b,s,e,c:t.c,n:n.trim(),p:pauseMin});db.work.timer=null;if(cur!==day)cur=day;save();render();}
+function timerDiscard(){if(!confirm('Discard this timer without logging?'))return;db.work.timer=null;save();render();}
+let tickId=null;
+function tick(){const t=T();const pill=$('#tpill');const clk=document.getElementById('tclock');
+  if(!t){pill.classList.add('hidden');if(clk)clk.textContent='00:00:00';return;}
+  const el=timerElapsed(t);pill.classList.remove('hidden');pill.className='tpill '+(t.running?'':'paused');pill.innerHTML=`<i></i><span class="l">${BIZ[t.b].n} · </span>${fmtClock(el)}`;if(clk)clk.textContent=fmtClock(el);}
+setInterval(tick,1000);
+function timerCard(){
+  const t=T(); const c=h(`<div class="card timer ${t?(t.running?'running':'paused'):''}"></div>`);
+  if(!t){
+    c.appendChild(h(`<div class="h-row"><div><h2>Timer</h2><p class="lead" style="margin:2px 0 0">Start when you sit down. Pause for breaks. Stop when you finish and it becomes a session.</p></div></div>`));
+    const bizRow=h(`<div></div>`),catRow=h(`<div style="margin-top:10px"></div>`);
+    const drawCats=()=>{catRow.innerHTML='';catRow.appendChild(h(`<div class="label">Category</div>`));if(!BIZ[wf.b].cats.includes(wf.c))wf.c=BIZ[wf.b].cats[0];catRow.appendChild(chipSel(BIZ[wf.b].cats.map(x=>[x,x]),wf.c,v=>{wf.c=v;drawCats();}));};
+    const drawBiz=()=>{bizRow.innerHTML='';bizRow.appendChild(h(`<div class="label">Business</div>`));bizRow.appendChild(chipSel([['VTS','vts',BIZ.vts.color],['Salma Plas','salma',BIZ.salma.color]],wf.b,v=>{wf.b=v;drawBiz();drawCats();},true));};
+    drawBiz();drawCats();c.appendChild(bizRow);c.appendChild(catRow);
+    const ctl=h(`<div class="ctl"><button class="btn primary one">${I.clock} Start timer</button></div>`);ctl.querySelector('button').onclick=()=>timerStart(wf.b,wf.c);c.appendChild(ctl);
+    return c;
+  }
+  const el=timerElapsed(t);const start=new Date(t.startAt);
+  c.appendChild(h(`<div><div class="live"><i></i>${t.running?'Working':'Paused'} · ${BIZ[t.b].n} · ${esc(t.c)}</div>
+    <div class="clock disp num" id="tclock">${fmtClock(el)}</div>
+    <div class="muted">Started ${pad(start.getHours())}:${pad(start.getMinutes())}${t.paused?` · ${Math.round(t.paused/60000)} min paused`:''}. Pauses are not counted.</div></div>`));
+  const ctl=h(`<div class="ctl"></div>`);
+  const pb=h(`<button class="btn">${t.running?'Pause':'Resume'}</button>`);pb.onclick=t.running?timerPause:timerResume;
+  const sb=h(`<button class="btn primary">${I.tick} Stop and log</button>`);sb.onclick=timerStop;
+  const db2=h(`<button class="btn one" style="min-height:40px;font-size:12.5px;color:var(--text-3)">Discard</button>`);db2.onclick=timerDiscard;
+  ctl.appendChild(pb);ctl.appendChild(sb);ctl.appendChild(db2);c.appendChild(ctl);
+  return c;
+}
 function renderWork(){
   const root=$('#tab-work'); root.innerHTML='';
   const days=weekDays(cur), prev=weekDays(addDays(cur,-7)), m=days[0];
@@ -675,8 +739,9 @@ function renderWork(){
   const fl=workFlags(days);
   g.appendChild(h(`<div class="kpis" style="grid-column:span 12">${tiles}${kpi('Outputs',I.tick,bizOutputs('vts',days)+bizOutputs('salma',days),'this week',days.map(s=>(db.work.sessions[s]||[]).filter(x=>x.n&&x.n.trim()).length),null,'')}</div>`));
   const A=h(`<div class="stack s5"></div>`), B=h(`<div class="stack s7"></div>`);
+  A.appendChild(timerCard());
   A.appendChild(h(fl.length?`<div class="alert">${I.alert}<div><b>Flags this week</b>${fl.map(esc).join('<br>')}</div></div>`:`<div class="alert ok">${I.tick}<div><b>No flags this week</b>Hours have outputs, nothing is untouched, nights are protected.</div></div>`));
-  const f=card('Log a session',`${fmtL(cur)}. Business, category, start, end, what moved.`);
+  const f=card('Log a session by hand',`${fmtL(cur)}. For sessions you forgot to time.`);
   const bizRow=h(`<div></div>`); const catRow=h(`<div style="margin-top:10px"></div>`);
   const drawCats=()=>{catRow.innerHTML='';catRow.appendChild(h(`<div class="label">Category</div>`));if(!BIZ[wf.b].cats.includes(wf.c))wf.c=BIZ[wf.b].cats[0];catRow.appendChild(chipSel(BIZ[wf.b].cats.map(c=>[c,c]),wf.c,v=>{wf.c=v;drawCats();}));};
   const drawBiz=()=>{bizRow.innerHTML='';bizRow.appendChild(h(`<div class="label">Business</div>`));bizRow.appendChild(chipSel([['VTS','vts',BIZ.vts.color],['Salma Plas','salma',BIZ.salma.color]],wf.b,v=>{wf.b=v;drawBiz();drawCats();},true));};
@@ -712,9 +777,9 @@ function renderWork(){
       mk.appendChild(chipSel([['Not yet',''],['Day off','off'],['No time','notime'],['Too tired','tired'],['Avoided it','avoided']],sk[b]||'',v=>{if(v)sk[b]=v;else delete sk[b];save();render();}));});
     A.appendChild(mk);
   }
-  const sl=card('Sessions',`${fmtL(cur)}${ss.length?` · ${fmtH(ss.reduce((a,x)=>a+hrs(x.s,x.e),0))}`:' · nothing logged yet'}`);
+  const sl=card('Sessions',`${fmtL(cur)}${ss.length?` · ${fmtH(ss.reduce((a,x)=>a+sessH(x),0))}`:' · nothing logged yet'}`);
   ['vts','salma'].forEach(b=>{if(sk[b])sl.appendChild(h(`<div class="sess"><div class="tm num" style="color:var(--text-3)">—<small>no session</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[b].color};display:inline-block"></i>${BIZ[b].n} · ${SKIP_L[sk[b]]}</b><span>Logged as a miss.</span></div></div>`));});
-  ss.slice().sort((a,b)=>mins(a.s)-mins(b.s)).forEach(x=>{const row=h(`<div class="sess"><div class="tm num">${x.s}–${x.e}<small>${fmtH(hrs(x.s,x.e))}</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[x.b].color};display:inline-block"></i>${BIZ[x.b].n} · ${esc(x.c)}</b><span>${x.n?esc(x.n):'No output noted'}</span></div><button class="del" aria-label="Delete session">${I.trash}</button></div>`);row.querySelector('.del').onclick=()=>{const idx=ss.indexOf(x);if(idx>-1){ss.splice(idx,1);save();render();}};sl.appendChild(row);});
+  ss.slice().sort((a,b)=>mins(a.s)-mins(b.s)).forEach(x=>{const row=h(`<div class="sess"><div class="tm num">${x.s}–${x.e}<small>${fmtH(sessH(x))}${x.p?` · ${x.p} min paused`:''}</small></div><div class="tx"><b><i style="width:8px;height:8px;border-radius:50%;background:${BIZ[x.b].color};display:inline-block"></i>${BIZ[x.b].n} · ${esc(x.c)}</b><span>${x.n?esc(x.n):'No output noted'}</span></div><button class="del" aria-label="Delete session">${I.trash}</button></div>`);row.querySelector('.del').onclick=()=>{const idx=ss.indexOf(x);if(idx>-1){ss.splice(idx,1);save();render();}};sl.appendChild(row);});
   B.appendChild(sl);
   const wt=card('This week by business','Hours by category, outputs, and when in the day the work happened.');
   ['vts','salma'].forEach(b=>{const cats=bizCatHours(b,days);const tot=bizHours(b,days);const out=bizOutputs(b,days);const entries=Object.entries(cats).sort((a,c)=>c[1]-a[1]);const col=c=>CATCOL[Math.max(0,BIZ[b].cats.indexOf(c))%CATCOL.length];
@@ -936,7 +1001,7 @@ function buildReport(){
   html+=`<h2>Weekly summary</h2><table><tr><th>Week of</th><th>Logged</th><th>Avg score</th><th>Clean</th><th>Bed 23:00</th><th>Gym</th><th>Swim</th><th>VTS h</th><th>Salma h</th><th>Remak h</th><th>Pages</th><th>5+ meals</th><th>Weight</th></tr>`;
   weeks.forEach(m=>{const d=weekDays(m);const t=weekTotals(d);html+=`<tr><td>${short(m)}</td><td>${t.logged}/7</td><td>${t.avg}%</td><td>${t.clean}</td><td>${t.bed}</td><td>${t.gym}/3</td><td>${t.swim}/1</td><td>${fmtH(bizHours('vts',d))}</td><td>${fmtH(bizHours('salma',d))}</td><td>${fmtH(bizHours('remak',d))}</td><td>${t.pages}/70</td><td>${t.meals}</td><td>${t.wavg?t.wavg+' kg':''}</td></tr>`;});
   html+=`</table><h2>Work sessions</h2><table><tr><th>Date</th><th>Business</th><th>Time</th><th>Category</th><th>What moved</th></tr>`;
-  Object.keys(db.work.sessions).sort().forEach(s=>db.work.sessions[s].forEach(x=>{html+=`<tr><td>${short(s)}</td><td>${BIZ[x.b].n}</td><td>${x.s}–${x.e} (${fmtH(hrs(x.s,x.e))})</td><td>${esc(x.c)}</td><td>${esc(x.n)}</td></tr>`;}));
+  Object.keys(db.work.sessions).sort().forEach(s=>db.work.sessions[s].forEach(x=>{html+=`<tr><td>${short(s)}</td><td>${BIZ[x.b].n}</td><td>${x.s}–${x.e} (${fmtH(sessH(x))})</td><td>${esc(x.c)}</td><td>${esc(x.n)}</td></tr>`;}));
   html+=`</table><h2>Remak</h2><table><tr><th>Date</th><th>In</th><th>Out</th><th>Hours</th><th>Note</th></tr>`;
   Object.keys(db.work.remak).sort().forEach(s=>{const r=db.work.remak[s];if(r.in||r.out||r.n||r.off)html+=`<tr><td>${short(s)}</td><td>${r.off?REMAK_OFF[r.off]:r.in}</td><td>${r.off?'':r.out}</td><td>${r.in&&r.out?fmtH(hrs(r.in,r.out)):''}</td><td>${esc(r.n)}</td></tr>`;});
   html+=`</table><h2>Missed side work</h2><table><tr><th>Date</th><th>Business</th><th>Reason</th></tr>`;
@@ -1016,6 +1081,8 @@ render();
 requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.add('ready')));
 $('#cloudBtn').innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .4-9 7 7 0 0 0-13.6 2A4 4 0 0 0 6 19z"/></svg>';
 $('#cloudBtn').onclick=openSheet;
+$('#tpill').onclick=()=>switchTab('work');
+tick();
 window.addEventListener('online',()=>{if(user)pull();});
 initAuth();
 </script>
