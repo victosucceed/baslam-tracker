@@ -16,6 +16,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
 <style>
   :root{
     --bg:#12130F; --elev:#1A1C16; --elev-2:#22241D; --line:#32352B; --line-strong:#45483C; --ctrl:#7E8273;
@@ -194,6 +195,18 @@
   .btn svg{width:17px;height:17px}
   .muted{color:var(--text-3);font-size:13px}
   #report{display:none}
+  .auth{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;background:var(--bg);padding:20px}
+  .auth.open{display:flex}
+  .auth-in{width:100%;max-width:380px}
+  .auth h1{font-size:30px;margin:0 0 4px}
+  .auth p{color:var(--text-3);font-size:14px;margin:0 0 18px}
+  .auth input{width:100%;margin-bottom:10px;font-size:16px}
+  .auth .btn{width:100%;justify-content:center;margin-bottom:8px}
+  .auth .err{color:var(--danger);font-size:13px;min-height:18px;margin:4px 0 8px}
+  .auth .skip{display:block;text-align:center;color:var(--text-3);font-size:13px;margin-top:10px;text-decoration:underline;cursor:pointer}
+  .cloud{position:relative}
+  .cloud::after{content:"";position:absolute;right:9px;bottom:9px;width:8px;height:8px;border-radius:50%;background:var(--text-3)}
+  .cloud.synced::after{background:var(--good)} .cloud.syncing::after{background:var(--accent)} .cloud.offline::after{background:var(--danger)} .cloud.local::after{display:none}
   @media print{
     body{background:#fff;color:#111;font-size:12px}
     .top,main,.bottom,.sheet{display:none!important}
@@ -215,6 +228,7 @@
     <div class="tools">
       <button class="icon-btn" id="prevDay" aria-label="Previous"></button>
       <button class="icon-btn" id="nextDay" aria-label="Next"></button>
+      <button class="icon-btn cloud local" id="cloudBtn" aria-label="Cloud sync status" title="Not signed in"></button>
       <button class="icon-btn" id="themeBtn" aria-label="Switch theme"></button>
       <button class="icon-btn" id="setBtn" aria-label="Settings and backup"></button>
     </div>
@@ -231,6 +245,16 @@
 <nav class="bottom" id="tabsBottom" aria-label="Sections"></nav>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"><div class="sheet-in" id="sheetIn"></div></div>
 <div id="report"></div>
+<div class="auth" id="auth" role="dialog" aria-labelledby="authTitle"><div class="auth-in">
+  <h1 class="serif" id="authTitle">Baslam Tracker</h1>
+  <p>Sign in so the phone and the Mac share one log. Same email and password on every device.</p>
+  <input type="email" id="authEmail" placeholder="Email" autocomplete="email" aria-label="Email">
+  <input type="password" id="authPass" placeholder="Password, 8 characters or more" autocomplete="current-password" aria-label="Password">
+  <div class="err" id="authErr"></div>
+  <button class="btn primary" id="authIn">Sign in</button>
+  <button class="btn" id="authUp">Create account</button>
+  <span class="skip" id="authSkip">Continue without an account, this device only</span>
+</div></div>
 
 <script>
 const I={
@@ -265,7 +289,36 @@ try{const raw=localStorage.getItem(KEY); if(raw) db=Object.assign(db,JSON.parse(
 if(!Array.isArray(db.milestones)) db.milestones=[];
 if(!db.workouts) db.workouts={}; if(!db.meals) db.meals={};
 let saveFailed=false;
-function save(){ try{localStorage.setItem(KEY,JSON.stringify(db));saveFailed=false;}catch(e){saveFailed=true;} }
+function save(){ try{localStorage.setItem(KEY,JSON.stringify(db));localStorage.setItem('baslam-updated',String(Date.now()));saveFailed=false;}catch(e){saveFailed=true;} schedulePush(); }
+function normalize(d){d=d&&typeof d==='object'?d:{};return {entries:d.entries||{},reviews:d.reviews||{},milestones:Array.isArray(d.milestones)?d.milestones:[],workouts:d.workouts||{},meals:d.meals||{}};}
+
+// ---------- cloud sync (Supabase) ----------
+const SB_URL='https://symkydchlaldltldwdte.supabase.co';
+const SB_KEY='sb_publishable_RSaTe8CpLfOnVFjmurNq4w_k2KzwVZe';
+const sb=(window.supabase&&window.supabase.createClient)?window.supabase.createClient(SB_URL,SB_KEY):null;
+let user=null, pushTmr=null, syncState='local';
+function setSync(s,title){syncState=s;const b=document.getElementById('cloudBtn');if(!b)return;b.className='icon-btn cloud '+s;b.title=title||({local:'Not signed in',synced:'Synced',syncing:'Syncing',offline:'Offline, saved on this device'})[s];}
+function schedulePush(){if(!user||!sb)return;setSync('syncing');clearTimeout(pushTmr);pushTmr=setTimeout(push,800);}
+async function push(){if(!user||!sb)return;const now=Date.now();try{const {error}=await sb.from('tracker_data').upsert({user_id:user.id,data:db,updated_at:new Date(now).toISOString()});if(error)throw error;setSync('synced');}catch(e){setSync('offline');}}
+async function pull(){if(!user||!sb)return;setSync('syncing');try{const {data,error}=await sb.from('tracker_data').select('data,updated_at').eq('user_id',user.id).maybeSingle();if(error)throw error;
+  const local=Number(localStorage.getItem('baslam-updated')||0);
+  if(data){const remote=new Date(data.updated_at).getTime();if(remote>local){db=normalize(data.data);try{localStorage.setItem(KEY,JSON.stringify(db));localStorage.setItem('baslam-updated',String(remote));}catch(e){}render();setSync('synced');}else if(local>remote){await push();}else setSync('synced');}
+  else await push();
+}catch(e){setSync('offline');}}
+function showAuth(on){document.getElementById('auth').classList.toggle('open',on);}
+async function initAuth(){
+  if(!sb){setSync('offline','Sync library did not load');return;}
+  const skip=(()=>{try{return localStorage.getItem('baslam-skip-auth')==='1';}catch(e){return false;}})();
+  const {data:{session}}=await sb.auth.getSession();
+  if(session){user=session.user;await pull();}else if(!skip){showAuth(true);}
+  sb.auth.onAuthStateChange((ev,s)=>{const was=user;user=s?s.user:null;if(user&&!was){showAuth(false);pull();}if(!user){setSync('local');}});
+  const err=document.getElementById('authErr');
+  const creds=()=>({email:document.getElementById('authEmail').value.trim(),password:document.getElementById('authPass').value});
+  document.getElementById('authIn').onclick=async()=>{err.textContent='';const {error}=await sb.auth.signInWithPassword(creds());if(error)err.textContent=error.message;};
+  document.getElementById('authUp').onclick=async()=>{err.textContent='';const c=creds();if(c.password.length<8){err.textContent='Password needs 8 characters or more.';return;}const {data,error}=await sb.auth.signUp(c);if(error){err.textContent=error.message;return;}if(!data.session){err.textContent='Account created. Check your email for the confirmation link, then sign in.';}};
+  document.getElementById('authSkip').onclick=()=>{try{localStorage.setItem('baslam-skip-auth','1');}catch(e){}showAuth(false);};
+}
+async function signOut(){if(sb){await sb.auth.signOut();}user=null;setSync('local');try{localStorage.removeItem('baslam-skip-auth');}catch(e){}closeSheet();showAuth(true);}
 
 // ---------- dates ----------
 const pad=n=>String(n).padStart(2,'0');
@@ -700,12 +753,17 @@ function printReport(){buildReport();closeSheet();setTimeout(()=>window.print(),
 function openSheet(){
   const n=Object.keys(db.entries).filter(k=>isLogged(db.entries[k])).length;
   const s=$('#sheetIn'); s.innerHTML='';
-  s.appendChild(h(`<div><h2 class="serif" id="sheetTitle">Settings</h2><p class="lead">${n} day${n===1?'':'s'} logged. Stored in this browser only, not synced. Copy a backup once a week and keep it in a note. Paste it on another device and press Import.</p>
+  s.appendChild(h(`<div><h2 class="serif" id="sheetTitle">Settings</h2>
+    <p class="lead">${user?`Signed in as ${esc(user.email)}. ${syncState==='synced'?'Everything is synced to the cloud.':syncState==='offline'?'Offline right now, saved on this device and pushed when back online.':'Syncing.'}`:'Not signed in. Data lives in this browser only.'}</p>
+    <div class="btns" style="margin-top:0;margin-bottom:14px">${user?`<button class="btn" id="signout">Sign out</button>`:`<button class="btn primary" id="signin">Sign in or create account</button>`}</div>
+    <h2 class="serif">Backup</h2><p class="lead">${n} day${n===1?'':'s'} logged. Copy a backup now and then and keep it in a note. Paste it on another device and press Import.</p>
     <textarea id="bak" aria-label="Backup text" style="font-size:12px;font-family:ui-monospace,Menlo,monospace;min-height:64px" placeholder="Backup text appears here. Paste a backup here to import."></textarea>
     <div class="btns"><button class="btn primary" id="exp">${I.copy} Copy backup</button><button class="btn" id="imp">${I.upload} Import</button><button class="btn danger" id="clr">${I.trash} Clear all</button></div>
     <h2 class="serif" style="margin-top:18px">Progress report</h2><p class="lead">Every week, every lift, every day and your reviews in one document. Opens the print dialog: choose Save as PDF, then share it.</p>
     <div class="btns"><button class="btn primary" id="rep">${I.review} Make PDF report</button><button class="btn" id="close">Close</button></div></div>`));
   $('#rep').onclick=printReport;
+  if($('#signout'))$('#signout').onclick=signOut;
+  if($('#signin'))$('#signin').onclick=()=>{closeSheet();showAuth(true);};
   const bak=$('#bak');
   $('#exp').onclick=()=>{bak.value=JSON.stringify(db);bak.select();try{navigator.clipboard.writeText(bak.value);alert('Backup copied to clipboard.');}catch(e){alert('Backup shown in the box. Select and copy it.');}};
   $('#imp').onclick=()=>{try{const d=JSON.parse(bak.value);if(d&&d.entries){db={entries:d.entries,reviews:d.reviews||{},milestones:d.milestones||[],workouts:d.workouts||{},meals:d.meals||{}};save();render();closeSheet();alert('Imported.');}else alert('Not a valid backup.');}catch(e){alert('Not a valid backup.');}};
@@ -735,6 +793,10 @@ $('#dateLabel').style.cursor='pointer';
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&cur>today())render();});
 render();
 requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.add('ready')));
+$('#cloudBtn').innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 .4-9 7 7 0 0 0-13.6 2A4 4 0 0 0 6 19z"/></svg>';
+$('#cloudBtn').onclick=openSheet;
+window.addEventListener('online',()=>{if(user)pull();});
+initAuth();
 </script>
 </body>
 </html>
